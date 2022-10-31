@@ -130,6 +130,10 @@ func (m *ticdcMemberManager) syncTiCDCConfigMap(tc *v1alpha1.TidbCluster, set *a
 // Sync fulfills the manager.Manager interface
 func (m *ticdcMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	if tc.Spec.TiCDC == nil {
+		err := m.cleanSubresourceIfNeeded(tc)
+		if err != nil {
+			return fmt.Errorf("clean cdc subresources failed: %v", err)
+		}
 		return nil
 	}
 
@@ -162,6 +166,41 @@ func (m *ticdcMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	}
 
 	return m.syncStatefulSet(tc)
+}
+
+func (m *ticdcMemberManager) cleanSubresourceIfNeeded(tc *v1alpha1.TidbCluster) error {
+	if tc.Status.TiCDC.StatefulSet == nil {
+		return nil
+	}
+
+	// query if statefulset actually exist
+	ns := tc.GetNamespace()
+	tcName := tc.GetName()
+	stsName := controller.TiCDCMemberName(tcName)
+	sts, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(stsName)
+	if err != nil {
+		if stsNotExist := errors.IsNotFound(err); stsNotExist {
+			resetTiCDCStatus(tc)
+			return nil
+		} else {
+			return fmt.Errorf("cleanSubresourceIfNeeded: failed to get ticdc sts %s for cluster %s/%s, error: %v",
+				stsName, ns, tcName, err)
+		}
+	}
+
+	// delete it if exist
+	err = m.deps.StatefulSetControl.DeleteStatefulSet(tc, sts)
+	if err != nil {
+		return fmt.Errorf("cleanSubresourceIfNeeded: failed to delete ticdc sts %s for cluster %s/%s, error: %v",
+			stsName, ns, tcName, err)
+	}
+
+	resetTiCDCStatus(tc)
+	return nil
+}
+
+func resetTiCDCStatus(tc *v1alpha1.TidbCluster) {
+	tc.Status.TiCDC = v1alpha1.TiCDCStatus{}
 }
 
 func (m *ticdcMemberManager) syncStatefulSet(tc *v1alpha1.TidbCluster) error {

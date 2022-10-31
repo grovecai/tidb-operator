@@ -1517,3 +1517,22 @@ func (oa *OperatorActions) WaitForTidbComponentsReady(tc *v1alpha1.TidbCluster, 
 
 	return err
 }
+
+func (oa *OperatorActions) WaitForTiCDCSubResourcesCleanup(tc *v1alpha1.TidbCluster, timeout, pollInterval time.Duration) error {
+	var lastCheckErr, err error
+	err = wait.PollImmediate(pollInterval, timeout, func() (bool, error) {
+		stsName := controller.TiCDCMemberName(tc.Name)
+		_, err := oa.tcStsGetter.StatefulSets(tc.Namespace).Get(context.TODO(), stsName, metav1.GetOptions{})
+		if err != nil && errors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			lastCheckErr = err
+		}
+		return false, nil
+	})
+	if err == wait.ErrWaitTimeout {
+		err = lastCheckErr
+	}
+	return err
+}

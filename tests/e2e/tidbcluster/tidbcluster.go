@@ -1833,6 +1833,31 @@ var _ = ginkgo.Describe("TiDBCluster", func() {
 
 			log.Logf("CDC works as expected")
 		})
+
+		ginkgo.It("should clean cdc sub resources if tc.Spec.TiCDC set nil", func() {
+			ginkgo.By("Creating cdc cluster")
+			fromTc := fixture.GetTidbCluster(ns, "tc-will-remove-cdc", utilimage.TiDBLatest)
+			fromTc = fixture.AddTiCDCForTidbCluster(fromTc)
+
+			fromTc.Spec.PD.Replicas = 3
+			fromTc.Spec.TiKV.Replicas = 3
+			fromTc.Spec.TiDB.Replicas = 1
+			fromTc.Spec.TiCDC.Replicas = 3
+
+			err := genericCli.Create(context.TODO(), fromTc)
+			framework.ExpectNoError(err, "Expected TiDB and CDC cluster created")
+			err = oa.WaitForTidbClusterReady(fromTc, 30*time.Minute, 5*time.Second)
+			framework.ExpectNoError(err, "Expected TiDB cluster and CDC ready")
+
+			fromTc.Spec.TiCDC = nil
+			err = genericCli.Update(context.TODO(), fromTc)
+			framework.ExpectNoError(err, "Expected CDC set nil successful")
+
+			err = oa.WaitForTiCDCSubResourcesCleanup(fromTc, 10*time.Minute, 5*time.Second)
+			framework.ExpectNoError(err, "Expected CDC sub resources cleanup successfully")
+
+			log.Logf("CDC sub resources cleaned as expected")
+		})
 	})
 
 	ginkgo.It("TiKV should mount multiple pvc", func() {

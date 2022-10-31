@@ -15,9 +15,11 @@ package member
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
 
+	"github.com/agiledragon/gomonkey/v2"
 	. "github.com/onsi/gomega"
 	"github.com/pingcap/tidb-operator/pkg/apis/label"
 	"github.com/pingcap/tidb-operator/pkg/apis/pingcap/v1alpha1"
@@ -31,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/utils/pointer"
 )
@@ -639,4 +642,130 @@ func newTidbClusterForCDC() *v1alpha1.TidbCluster {
 			},
 		},
 	}
+}
+
+func Test_cleanSubresourceIfNeeded_NoCleanNeeded(t *testing.T) {
+	//setup
+	tc := &v1alpha1.TidbCluster{}
+	tc.Status.TiCDC.StatefulSet = nil
+
+	ticdcMemberManager := &ticdcMemberManager{}
+	//execute
+	err := ticdcMemberManager.cleanSubresourceIfNeeded(tc)
+
+	//verify
+	assert.Nil(t, err)
+	assert.Nil(t, tc.Status.TiCDC.StatefulSet)
+}
+
+func Test_cleanSubresourceIfNeeded_GetStsFailed(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	//setup
+	tc := &v1alpha1.TidbCluster{}
+	tc.Status.TiCDC.StatefulSet = &apps.StatefulSetStatus{}
+
+	mStatefulSetLister := appslisters.NewStatefulSetLister(nil)
+	mStatefulSetNamespaceLister := appslisters.NewStatefulSetLister(nil).StatefulSets("dummy")
+	patches.ApplyMethodReturn(mStatefulSetLister, "StatefulSets", mStatefulSetNamespaceLister).
+		ApplyMethodReturn(mStatefulSetNamespaceLister, "Get", nil, fmt.Errorf("dummy")).
+		ApplyFuncReturn(errors.IsNotFound, false)
+
+	ticdcMemberManager := &ticdcMemberManager{}
+	ticdcMemberManager.deps = &controller.Dependencies{}
+	ticdcMemberManager.deps.StatefulSetLister = mStatefulSetLister
+
+	//execute
+	err := ticdcMemberManager.cleanSubresourceIfNeeded(tc)
+
+	//verify
+	assert.NotNil(t, err)
+	assert.NotNil(t, tc.Status.TiCDC.StatefulSet)
+}
+
+func Test_cleanSubresourceIfNeeded_ResetStatusIfAlreadyClean(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	//setup
+	tc := &v1alpha1.TidbCluster{}
+	tc.Status.TiCDC.StatefulSet = &apps.StatefulSetStatus{}
+
+	mStatefulSetLister := appslisters.NewStatefulSetLister(nil)
+	mStatefulSetNamespaceLister := appslisters.NewStatefulSetLister(nil).StatefulSets("dummy")
+	patches.ApplyMethodReturn(mStatefulSetLister, "StatefulSets", mStatefulSetNamespaceLister).
+		ApplyMethodReturn(mStatefulSetNamespaceLister, "Get", nil, fmt.Errorf("dummy")).
+		ApplyFuncReturn(errors.IsNotFound, true)
+
+	ticdcMemberManager := &ticdcMemberManager{}
+	ticdcMemberManager.deps = &controller.Dependencies{}
+	ticdcMemberManager.deps.StatefulSetLister = mStatefulSetLister
+
+	//execute
+	err := ticdcMemberManager.cleanSubresourceIfNeeded(tc)
+
+	//verify
+	assert.Nil(t, err)
+	assert.Nil(t, tc.Status.TiCDC.StatefulSet)
+}
+
+func Test_cleanSubresourceIfNeeded_Failed2Clean(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	//setup
+	tc := &v1alpha1.TidbCluster{}
+	tc.Status.TiCDC.StatefulSet = &apps.StatefulSetStatus{}
+	mStatefulSet := &apps.StatefulSet{}
+
+	mStatefulSetLister := appslisters.NewStatefulSetLister(nil)
+	mStatefulSetNamespaceLister := appslisters.NewStatefulSetLister(nil).StatefulSets("dummy")
+	patches.ApplyMethodReturn(mStatefulSetLister, "StatefulSets", mStatefulSetNamespaceLister).
+		ApplyMethodReturn(mStatefulSetNamespaceLister, "Get", mStatefulSet, nil)
+
+	mStatefulSetControl := controller.NewRealStatefuSetControl(nil, nil, nil)
+	patches.ApplyMethodReturn(mStatefulSetControl, "DeleteStatefulSet", fmt.Errorf("clean failed"))
+
+	ticdcMemberManager := &ticdcMemberManager{}
+	ticdcMemberManager.deps = &controller.Dependencies{}
+	ticdcMemberManager.deps.StatefulSetLister = mStatefulSetLister
+	ticdcMemberManager.deps.StatefulSetControl = mStatefulSetControl
+
+	//execute
+	err := ticdcMemberManager.cleanSubresourceIfNeeded(tc)
+
+	//verify
+	assert.NotNil(t, err)
+	assert.NotNil(t, tc.Status.TiCDC.StatefulSet)
+}
+
+func Test_cleanSubresourceIfNeeded_HappilyClean(t *testing.T) {
+	patches := gomonkey.NewPatches()
+	defer patches.Reset()
+
+	//setup
+	tc := &v1alpha1.TidbCluster{}
+	tc.Status.TiCDC.StatefulSet = &apps.StatefulSetStatus{}
+	mStatefulSet := &apps.StatefulSet{}
+
+	mStatefulSetLister := appslisters.NewStatefulSetLister(nil)
+	mStatefulSetNamespaceLister := appslisters.NewStatefulSetLister(nil).StatefulSets("dummy2")
+	patches.ApplyMethodReturn(mStatefulSetLister, "StatefulSets", mStatefulSetNamespaceLister).
+		ApplyMethodReturn(mStatefulSetNamespaceLister, "Get", mStatefulSet, nil)
+
+	mStatefulSetControl := controller.NewRealStatefuSetControl(nil, nil, nil)
+	patches.ApplyMethodReturn(mStatefulSetControl, "DeleteStatefulSet", nil)
+
+	ticdcMemberManager := &ticdcMemberManager{}
+	ticdcMemberManager.deps = &controller.Dependencies{}
+	ticdcMemberManager.deps.StatefulSetLister = mStatefulSetLister
+	ticdcMemberManager.deps.StatefulSetControl = mStatefulSetControl
+
+	//execute
+	err := ticdcMemberManager.cleanSubresourceIfNeeded(tc)
+
+	//verify
+	assert.Nil(t, err)
+	assert.Nil(t, tc.Status.TiCDC.StatefulSet)
 }
