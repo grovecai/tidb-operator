@@ -13,7 +13,7 @@ require (
 	github.com/MakeNowJust/heredoc v0.0.0-20171113091838-e9091a26100e // indirect
 	github.com/Masterminds/semver v1.4.2
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
-	github.com/agiledragon/gomonkey/v2 v2.3.0
+	github.com/agiledragon/gomonkey/v2 v2.9.0
 	github.com/aws/aws-sdk-go v1.30.9
 	github.com/aws/aws-sdk-go-v2 v1.16.11
 	github.com/aws/aws-sdk-go-v2/config v1.17.1

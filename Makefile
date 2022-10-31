@@ -145,12 +145,12 @@ test: TEST_PACKAGES = ./cmd/backup-manager/app ./pkg
 test:
 	@echo "Run unit tests"
 ifeq ($(GO_COVER),y)
-	go test -cover \
+	go test -gcflags=all=-l -cover \
 		$(foreach pkg, $(TEST_PACKAGES), $(pkg)/...) \
 		$(foreach mod, $(GO_SUBMODULES), $(mod)/...) \
 		-coverpkg=$$($(TEST_COVER_PACKAGES)) -coverprofile=coverage.txt -covermode=atomic
 else
-	go test \
+	go test -gcflags=all=-l \
 		$(foreach pkg, $(TEST_PACKAGES), $(pkg)/...) \
 		$(foreach mod, $(GO_SUBMODULES), $(mod)/...)
 endif
